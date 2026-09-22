@@ -271,48 +271,22 @@ public class AiCommandService {
     public BusinessChatResponse chatBusiness(BusinessChatRequest request) {
         if (request == null || request.getMessage() == null || request.getMessage().isBlank()) {
             return BusinessChatResponse.builder()
-                    .reply("¡Hola! Soy tu Asistente de Arquitectura Empresarial (Gemma 2: 2B). ¿En qué lógica de negocio (contabilidad, inventario, transacciones financieras, etc.) deseas estructurar tu backend hoy?")
+                    .reply("¡Hola! Soy tu Asistente de Arquitectura Empresarial. "
+                         + "¿Qué tipo de negocio o rubro deseas modelar hoy? "
+                         + "Por ejemplo: farmacia, restaurante, transporte, contabilidad, e-commerce, clínica, etc.")
                     .success(true)
                     .source("system")
                     .build();
         }
 
         String userMsg = request.getMessage().trim();
-        String context = request.getDomainContext() != null ? request.getDomainContext().trim() : "";
+        String effectiveType = request.effectiveBusinessType(); // puede ser null → prompt genérico
 
         StringBuilder promptBuilder = new StringBuilder();
-        promptBuilder.append("""
-            Eres un Arquitecto de Software Empresarial Senior especializado en lógica de backend empresarial, contabilidad, inventarios, facturación, transacciones financieras y bases de datos relacionales en Spring Boot.
-            Tu misión es guiar al usuario en el diseño de arquitectura, entidades, reglas de negocio y transaccionalidad.
-            Responde de manera estructurada, técnica y en español.
-            Si la consulta involucra diseñar o definir clases o entidades para el sistema, proporciona al final de tu respuesta un bloque de código JSON con las clases, atributos y relaciones sugeridas con este formato exacto:
-            ```json
-            {
-              "domain": "NombreDominio",
-              "classes": [
-                {
-                  "name": "NombreClase",
-                  "attrs": [
-                    {"name": "id", "type": "Long"},
-                    {"name": "campo", "type": "String"}
-                  ],
-                  "methods": ["metodoPrincipal()"]
-                }
-              ],
-              "relations": [
-                {
-                  "source": "ClaseA",
-                  "target": "ClaseB",
-                  "relationType": "association",
-                  "mult": "1..*"
-                }
-              ]
-            }
-            ```
-            """);
+        promptBuilder.append(buildDynamicSystemPrompt(effectiveType));
 
-        if (!context.isEmpty()) {
-            promptBuilder.append("\nDominio/Contexto específico: ").append(context).append("\n");
+        if (effectiveType != null) {
+            promptBuilder.append("\nRubro/tipo de negocio del usuario: ").append(effectiveType).append("\n");
         }
 
         if (request.getHistory() != null && !request.getHistory().isEmpty()) {
@@ -338,14 +312,67 @@ public class AiCommandService {
                         .suggestedArchitecture(suggested)
                         .success(true)
                         .source("ollama-" + targetModel)
-                        .message("Respuesta generada por " + targetModel)
+                        .message("Respuesta generada por " + targetModel
+                                + (effectiveType != null ? " | Rubro: " + effectiveType : ""))
                         .build();
             }
         } catch (Exception ex) {
             log.warn("[AI_SERVICE] Business chat call to Ollama ({}) failed or timed out: {}. Using heuristic fallback.", targetModel, ex.getMessage());
         }
 
-        return buildBusinessChatFallback(userMsg, context);
+        return buildBusinessChatFallback(userMsg, effectiveType);
+    }
+
+    /**
+     * Construye el System Prompt dinámico según el rubro/tipo de negocio indicado por el usuario.
+     * Si el rubro es nulo o vacío, genera un prompt genérico polivalente.
+     *
+     * @param businessType Rubro o tipo de empresa (ej. "farmacia", "transporte", "contabilidad").  Puede ser null.
+     * @return System prompt completo listo para ser inyectado al modelo.
+     */
+    private String buildDynamicSystemPrompt(String businessType) {
+        String rubroLine;
+        if (businessType != null && !businessType.isBlank()) {
+            rubroLine = "Eres un Arquitecto de Software Empresarial Senior especializado en el rubro de \""
+                    + businessType
+                    + "\". Adapta todos tus consejos, entidades y reglas de negocio específicamente a ese tipo de empresa.";
+        } else {
+            rubroLine = "Eres un Arquitecto de Software Empresarial Senior capaz de asesorar cualquier tipo de negocio o industria. "
+                    + "Identifica el rubro del usuario a través del contexto de la conversación y adapta tu respuesta a él.";
+        }
+
+        return rubroLine + """
+
+            Tu misión es guiar al usuario en el diseño de arquitectura de software, modelado de entidades, reglas de negocio y transaccionalidad en Spring Boot.
+            Responde siempre en español de forma estructurada y técnica.
+            Evita responder siempre lo mismo: adapta las entidades, atributos y relaciones al dominio específico del negocio del usuario.
+            Si la consulta involucra diseñar o definir clases o entidades, incluye al final de tu respuesta un bloque JSON con este formato exacto:
+            ```json
+            {
+              "domain": "NombreDominio",
+              "classes": [
+                {
+                  "name": "NombreClase",
+                  "attrs": [
+                    {"name": "id", "type": "Long"},
+                    {"name": "campo", "type": "String"}
+                  ],
+                  "methods": ["metodoPrincipal()"]
+                }
+              ],
+              "relations": [
+                {
+                  "source": "ClaseA",
+                  "target": "ClaseB",
+                  "relationType": "association",
+                  "mult": "1..*"
+                }
+              ]
+            }
+            ```
+            Tipos de atributos permitidos: Long, String, Double, LocalDate.
+            Siempre incluye un atributo id de tipo Long en cada entidad.
+            """;
     }
 
     /**
@@ -879,8 +906,9 @@ public class AiCommandService {
     /**
      * Fallback para Chat Empresarial cuando Ollama no responde o está apagado.
      */
-    private BusinessChatResponse buildBusinessChatFallback(String userPrompt, String context) {
-        String lower = (userPrompt + " " + context).toLowerCase(Locale.ROOT);
+    private BusinessChatResponse buildBusinessChatFallback(String userPrompt, String businessType) {
+        // Combinamos el prompt del usuario con el rubro para detectar palabras clave
+        String lower = (userPrompt + " " + (businessType != null ? businessType : "")).toLowerCase(Locale.ROOT);
         String reply;
         AiDomainResponse architecture;
 
@@ -896,6 +924,17 @@ public class AiCommandService {
                 *He preparado la estructura UML recomendada para que puedas aplicarla directamente al lienzo.*
                 """;
             architecture = buildInventoryDomainFallback();
+        } else if (businessType != null && !businessType.isBlank()) {
+            // Rubro genérico personalizado: usar el nombre del rubro en la respuesta
+            String rubroCapitalized = Character.toUpperCase(businessType.charAt(0)) + businessType.substring(1);
+            reply = "### Arquitectura de Backend para \"" + rubroCapitalized + "\" (Spring Boot)\n"
+                    + "Para el rubro de **" + rubroCapitalized + "** se recomienda modelar las entidades centrales "
+                    + "del negocio (clientes, productos/servicios, transacciones, empleados, etc.) adaptadas a los "
+                    + "procesos específicos de ese sector.\n"
+                    + "Define las reglas de negocio particulares (precios, stock, reservas, turnos, etc.) y "
+                    + "aplica transaccionalidad (`@Transactional`) donde haya operaciones críticas.\n\n"
+                    + "*Especifica más detalles de tu sistema para que pueda generar la estructura UML exacta.*";
+            architecture = buildHeuristicFallback(rubroCapitalized, "Arquitectura base para rubro: " + rubroCapitalized);
         } else {
             reply = """
                 ### Arquitectura Contable y Financiera Empresarial (Spring Boot)

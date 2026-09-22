@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { emitDiagramEvent, onDiagramEvent } from '../services/websocketService.js';
 import wsClient from '../services/wsClient.js';
+import { generateIntermediateClassName, isManyToMany } from '../utils/namingUtils.js';
 
 let classIdCounter = 1;
 
@@ -137,7 +138,9 @@ const useUmlStore = create((set, get) => ({
   deleteClass: (id, broadcast = true) => {
     set((s) => ({
       classes: s.classes.filter((c) => c.id !== id),
-      relations: s.relations.filter((r) => r.fromId !== id && r.toId !== id && r.sourceId !== id && r.targetId !== id),
+      relations: s.relations
+        .filter((r) => r.fromId !== id && r.toId !== id && r.sourceId !== id && r.targetId !== id)
+        .map((r) => (r.intermediateClassId === id ? { ...r, intermediateClassId: undefined } : r)),
     }));
     if (broadcast) {
       wsClient.sendMutation('CLASS_DELETED', { id });
@@ -189,14 +192,17 @@ const useUmlStore = create((set, get) => ({
   },
 
   addRelation: (param1, param2, mult = '1..*', relationType = 'association', intermediateTableName = '', broadcast = true) => {
-    let fromId, toId, optMult, optType, optInterName, optBroadcast;
+    let fromId, toId, optMult, optType, optInterName, optBroadcast, optSrcMult, optTgtMult, optInterClassId;
 
     if (typeof param1 === 'object' && param1 !== null) {
       fromId = param1.fromId || param1.sourceId;
       toId = param1.toId || param1.targetId;
-      optMult = param1.mult || param1.targetMultiplicity || '1..*';
+      optSrcMult = param1.sourceMultiplicity;
+      optTgtMult = param1.targetMultiplicity;
+      optMult = param1.mult || (optSrcMult && optTgtMult ? `${optSrcMult}..${optTgtMult}` : '1..*');
       optType = param1.relationType || 'association';
-      optInterName = param1.intermediateTableName || param1.intermediateTableInfo?.tableName || '';
+      optInterName = param1.intermediateTableName || param1.intermediateTableInfo?.tableName || param1.intermediateClassName || '';
+      optInterClassId = param1.intermediateClassId;
       optBroadcast = param1.broadcast !== false;
     } else {
       fromId = param1;
@@ -222,11 +228,54 @@ const useUmlStore = create((set, get) => ({
       optMult = '1..*';
     }
 
-    const defaultInterName = `${from.name}_${to.name}`;
-    const resolvedInterName = optMult === '*..*' ? (optInterName.trim() || defaultInterName) : undefined;
-
     const isInheritance = optType === 'inheritance';
     const isContainerRel = optType === 'composition' || optType === 'aggregation';
+
+    let resolvedSrcMult = isInheritance ? '' : (isContainerRel ? '1' : (optSrcMult || (optMult.includes('..') ? optMult.split('..')[0] : '0..*')));
+    let resolvedTgtMult = isInheritance ? '' : (isContainerRel ? '*' : (optTgtMult || (optMult.includes('..') ? optMult.split('..')[1] : '1..*')));
+
+    const isNM = !isInheritance && !isContainerRel && isManyToMany(resolvedSrcMult, resolvedTgtMult, optMult);
+
+    let resolvedInterName = '';
+    let resolvedInterClassId = optInterClassId;
+
+    if (isNM) {
+      resolvedInterName = optInterName.trim() || generateIntermediateClassName(from.name, to.name);
+
+      // Verificar si la clase intermedia ya existe en el lienzo
+      let interClass = resolvedInterClassId ? classes.find((c) => c.id === resolvedInterClassId) : null;
+      if (!interClass) {
+        interClass = classes.find((c) => c.name.toLowerCase() === resolvedInterName.toLowerCase());
+      }
+
+      // Si no existe, crear la clase intermedia automáticamente con atributo obligatorio id: Long
+      if (!interClass) {
+        const interId = `cls_inter_${Date.now()}_${classIdCounter++}`;
+        const midX = Math.round(((from.x || 0) + (to.x || 0)) / 2);
+        const midY = Math.round(((from.y || 0) + (to.y || 0)) / 2 + 120);
+
+        interClass = {
+          id: interId,
+          name: resolvedInterName,
+          attrs: [{ name: 'id', type: 'Long', version: 0 }],
+          x: midX,
+          y: midY,
+          version: 0,
+          isIntermediate: true,
+          roomId: get().currentRoom?.id,
+        };
+
+        set((s) => ({ classes: [...s.classes, interClass] }));
+
+        if (optBroadcast) {
+          wsClient.sendMutation('CLASS_CREATED', interClass);
+          emitDiagramEvent('CLASS_ADDED', interClass, get().diagramId);
+        }
+      }
+
+      resolvedInterClassId = interClass.id;
+      resolvedInterName = interClass.name;
+    }
 
     const newRelation = {
       id: `rel_${Date.now()}`,
@@ -238,9 +287,11 @@ const useUmlStore = create((set, get) => ({
       toName: to.name,
       mult: optMult,
       relationType: optType, // 'association' | 'aggregation' | 'composition' | 'inheritance'
-      sourceMultiplicity: isInheritance ? '' : (isContainerRel ? '1' : (optMult.includes('..') ? optMult.split('..')[0] : '1')),
-      targetMultiplicity: isInheritance ? '' : (isContainerRel ? '*' : (optMult.includes('..') ? optMult.split('..')[1] : optMult)),
-      intermediateTableName: resolvedInterName,
+      sourceMultiplicity: resolvedSrcMult,
+      targetMultiplicity: resolvedTgtMult,
+      intermediateClassId: resolvedInterClassId || undefined,
+      intermediateClassName: resolvedInterName || undefined,
+      intermediateTableName: resolvedInterName || undefined,
       intermediateTableInfo: resolvedInterName ? {
         tableName: resolvedInterName,
         sourceForeignKey: `${from.name.toLowerCase()}_id`,
@@ -412,8 +463,8 @@ const useUmlStore = create((set, get) => ({
       const fromId = rel.fromId || rel.sourceId;
       const toId = rel.toId || rel.targetId;
       const relationType = rel.relationType || 'association';
-      const mult = rel.mult || rel.targetMultiplicity || '1..*';
-      const interName = rel.intermediateTableName || rel.intermediateTableInfo?.tableName || (mult === '*..*' ? `${rel.fromName || 'Origen'}_${rel.toName || 'Destino'}` : undefined);
+      const interName = rel.intermediateClassName || rel.intermediateTableName || rel.intermediateTableInfo?.tableName || (mult === '*..*' ? `${rel.fromName || 'Origen'}_${rel.toName || 'Destino'}` : undefined);
+      const interClassId = rel.intermediateClassId || (interName ? hydratedClasses.find((c) => c.name.toLowerCase() === interName.toLowerCase())?.id : undefined);
 
       return {
         id: rel.id || `rel_${Date.now()}_${i}`,
@@ -427,6 +478,8 @@ const useUmlStore = create((set, get) => ({
         relationType,
         sourceMultiplicity: rel.sourceMultiplicity || (relationType === 'inheritance' ? '' : (mult.includes('..') ? mult.split('..')[0] : '1')),
         targetMultiplicity: rel.targetMultiplicity || (relationType === 'inheritance' ? '' : (mult.includes('..') ? mult.split('..')[1] : mult)),
+        intermediateClassId: interClassId,
+        intermediateClassName: interName,
         intermediateTableName: interName,
         intermediateTableInfo: rel.intermediateTableInfo || (interName ? {
           tableName: interName,

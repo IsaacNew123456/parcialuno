@@ -156,7 +156,9 @@ function UmlClassCard({ cls, onMouseDown }) {
             {cls.name}
           </span>
         )}
-        <span className="uml-card-badge">«entity»</span>
+        <span className="uml-card-badge">
+          {cls.isIntermediate || cls.name?.startsWith('Detalle_') ? '«intermedia»' : '«entity»'}
+        </span>
         <button
           className="uml-card-delete"
           onMouseDown={(e) => e.stopPropagation()}

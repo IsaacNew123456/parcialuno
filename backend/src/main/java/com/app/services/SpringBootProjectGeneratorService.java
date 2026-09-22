@@ -157,12 +157,81 @@ public class SpringBootProjectGeneratorService {
             }
         }
 
+        // Auto-materializar clase intermedia para relaciones Muchos a Muchos (N:M)
+        for (RelationModel rel : model.getRelations()) {
+            if (rel.getMult() == null || rel.getMult().isBlank()) {
+                rel.setMult("1..*");
+            }
+            if (rel.isManyToMany()) {
+                ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                if (from != null && to != null) {
+                    String interName = rel.getIntermediateClassName();
+                    if (interName == null || interName.isBlank()) {
+                        String eff = rel.getEffectiveIntermediateTable();
+                        if (eff != null && !eff.isBlank()) {
+                            interName = eff;
+                        } else {
+                            interName = from.getName() + "_" + to.getName();
+                        }
+                        rel.setIntermediateClassName(interName);
+                    }
+                    interName = sanitizeClassName(interName);
+
+                    ClassModel interCls = resolveIntermediateClass(model, rel);
+                    if (interCls == null) {
+                        interCls = new ClassModel();
+                        interCls.setId(interName);
+                        interCls.setName(interName);
+                        interCls.setIntermediate(true);
+                        AttrModel idAttr = new AttrModel();
+                        idAttr.setName("id");
+                        idAttr.setType("Long");
+                        interCls.setAttrs(new ArrayList<>(List.of(idAttr)));
+                        model.getClasses().add(interCls);
+                    }
+                    rel.setIntermediateClassId(interCls.getId());
+                    rel.setIntermediateClassName(interCls.getName());
+                }
+            }
+        }
+
         return model;
+    }
+
+    private ClassModel resolveIntermediateClass(DiagramModel model, RelationModel rel) {
+        if (!rel.isManyToMany()) {
+            return null;
+        }
+        String interId = rel.getIntermediateClassId();
+        String interName = rel.getIntermediateClassName();
+        for (ClassModel c : model.getClasses()) {
+            if (interId != null && !interId.isBlank() && interId.equalsIgnoreCase(c.getId())) {
+                return c;
+            }
+            if (interName != null && !interName.isBlank() && interName.equalsIgnoreCase(c.getName())) {
+                return c;
+            }
+        }
+        ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+        ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+        if (from != null && to != null) {
+            String genName = NamingUtils.generateIntermediateClassName(from.getName(), to.getName());
+            for (ClassModel c : model.getClasses()) {
+                if (genName.equalsIgnoreCase(c.getName())) {
+                    return c;
+                }
+            }
+        }
+        return null;
     }
 
     private record Association(ClassModel one, ClassModel many, RelationModel rel) {}
 
     private Association fkSide(DiagramModel model, RelationModel rel) {
+        if (rel.isManyToMany() || "*..*".equals(rel.getMult()) || rel.getEffectiveIntermediateTable() != null) {
+            return null;
+        }
         ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
         ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
         if (from == null || to == null) {
@@ -179,6 +248,16 @@ public class SpringBootProjectGeneratorService {
     private List<ClassModel> manyToOneOf(ClassModel cls, DiagramModel model) {
         List<ClassModel> result = new ArrayList<>();
         for (RelationModel rel : model.getRelations()) {
+            if (rel.isManyToMany()) {
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                if (inter != null && (inter.getId().equals(cls.getId()) || inter.getName().equalsIgnoreCase(cls.getName()))) {
+                    ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                    ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                    if (from != null && !result.contains(from)) result.add(from);
+                    if (to != null && !result.contains(to)) result.add(to);
+                }
+                continue;
+            }
             Association assoc = fkSide(model, rel);
             if (assoc != null && assoc.many().getId().equals(cls.getId())) {
                 result.add(assoc.one());
@@ -190,6 +269,20 @@ public class SpringBootProjectGeneratorService {
     private List<ClassModel> oneToManyOf(ClassModel cls, DiagramModel model) {
         List<ClassModel> result = new ArrayList<>();
         for (RelationModel rel : model.getRelations()) {
+            if (rel.isManyToMany()) {
+                ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                if (inter != null) {
+                    if (from != null && (from.getId().equals(cls.getId()) || from.getName().equalsIgnoreCase(cls.getName()))) {
+                        if (!result.contains(inter)) result.add(inter);
+                    }
+                    if (to != null && (to.getId().equals(cls.getId()) || to.getName().equalsIgnoreCase(cls.getName()))) {
+                        if (!result.contains(inter)) result.add(inter);
+                    }
+                }
+                continue;
+            }
             Association assoc = fkSide(model, rel);
             if (assoc != null && assoc.one().getId().equals(cls.getId())) {
                 result.add(assoc.many());
@@ -581,7 +674,11 @@ public class SpringBootProjectGeneratorService {
 
     private String toPascalCase(String raw) {
         if (raw == null) return "";
-        String[] parts = raw.trim().split("[^A-Za-z0-9]+");
+        String trimmed = raw.trim();
+        if (trimmed.startsWith("Detalle_")) {
+            return "Detalle_" + toPascalCase(trimmed.substring(8));
+        }
+        String[] parts = trimmed.split("[^A-Za-z0-9]+");
         StringBuilder out = new StringBuilder();
         for (String part : parts) {
             if (part.isBlank()) continue;
@@ -596,6 +693,9 @@ public class SpringBootProjectGeneratorService {
     private String toCamelCase(String raw) {
         String pascal = toPascalCase(raw);
         if (pascal.isEmpty()) return "prop";
+        if (pascal.startsWith("Detalle_")) {
+            return "detalle" + pascal.substring(8);
+        }
         return Character.toLowerCase(pascal.charAt(0)) + (pascal.length() > 1 ? pascal.substring(1) : "");
     }
 

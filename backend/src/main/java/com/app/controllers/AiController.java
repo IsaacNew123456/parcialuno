@@ -59,8 +59,9 @@ public class AiController {
      */
     @PostMapping("/business-chat")
     public ResponseEntity<BusinessChatResponse> businessChat(@RequestBody BusinessChatRequest request) {
-        log.info("[AI_CONTROLLER] Received business chat message: '{}', domainContext='{}'",
+        log.info("[AI_CONTROLLER] Received business chat message: '{}', businessType='{}', domainContext='{}'",
                 request != null ? request.getMessage() : "null",
+                request != null ? request.getBusinessType() : "",
                 request != null ? request.getDomainContext() : "");
 
         BusinessChatResponse response = aiCommandService.chatBusiness(request);

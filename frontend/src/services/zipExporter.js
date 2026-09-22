@@ -150,21 +150,64 @@ public class Application {
 `;
 }
 
-function genEntity(cls) {
+function genEntity(cls, relations = [], classes = []) {
   const name = toPascal(cls.name);
-  const table = toSnake(cls.name) + 's';
+  const table = toSnake(cls.name);
   const attrs = (cls.attrs || [])
+    .filter((a) => a.name !== 'id')
     .map((a) => {
       const javaType = mapType(a.type);
       return `    private ${javaType} ${toLower(a.name)};`;
     })
     .join('\n');
 
+  // Relaciones ManyToOne si cls es clase intermedia N:M
+  const manyToOneFields = [];
+  // Relaciones OneToMany si cls es una de las clases principales
+  const oneToManyFields = [];
+
+  for (const rel of relations) {
+    const from = classes.find((c) => c.id === rel.fromId || c.id === rel.sourceId);
+    const to = classes.find((c) => c.id === rel.toId || c.id === rel.targetId);
+    if (!from || !to) continue;
+
+    const isInter = (rel.intermediateClassId && rel.intermediateClassId === cls.id) ||
+      (rel.intermediateClassName && rel.intermediateClassName.toLowerCase() === cls.name.toLowerCase()) ||
+      (rel.intermediateTableName && rel.intermediateTableName.toLowerCase() === cls.name.toLowerCase());
+
+    if (isInter) {
+      manyToOneFields.push(`    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "${toSnake(from.name)}_id", nullable = false)
+    private ${toPascal(from.name)} ${toLower(from.name)};
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "${toSnake(to.name)}_id", nullable = false)
+    private ${toPascal(to.name)} ${toLower(to.name)};`);
+    } else {
+      // Verificar si cls es from o to de una relación que tiene clase intermedia
+      const interClass = classes.find((c) =>
+        (rel.intermediateClassId && c.id === rel.intermediateClassId) ||
+        (rel.intermediateClassName && c.name.toLowerCase() === rel.intermediateClassName.toLowerCase()) ||
+        (rel.intermediateTableName && c.name.toLowerCase() === rel.intermediateTableName.toLowerCase())
+      );
+      if (interClass && (from.id === cls.id || to.id === cls.id)) {
+        const propName = toLower(cls.name);
+        oneToManyFields.push(`    @OneToMany(mappedBy = "${propName}", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    private List<${toPascal(interClass.name)}> ${toLower(interClass.name)}List = new ArrayList<>();`);
+      }
+    }
+  }
+
+  const extraRelations = [...manyToOneFields, ...oneToManyFields].join('\n\n');
+
   return `package com.app.entities;
 
 import jakarta.persistence.*;
 import lombok.*;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "${table}")
@@ -176,6 +219,7 @@ public class ${name} {
     private Long id;
 
 ${attrs || '    // Sin atributos adicionales'}
+${extraRelations ? '\n' + extraRelations : ''}
 }
 `;
 }
@@ -521,7 +565,7 @@ export async function generateLocalZip(diagramModel) {
   zip.file(`${base}/Application.java`, genMain());
 
   for (const cls of classes) {
-    zip.file(`${base}/entities/${toPascal(cls.name)}.java`, genEntity(cls));
+    zip.file(`${base}/entities/${toPascal(cls.name)}.java`, genEntity(cls, relations, classes));
     zip.file(`${base}/repositories/${toPascal(cls.name)}Repository.java`, genRepository(cls));
     zip.file(`${base}/services/${toPascal(cls.name)}Service.java`, genService(cls));
     zip.file(`${base}/controllers/${toPascal(cls.name)}Controller.java`, genController(cls));
@@ -541,7 +585,7 @@ export function previewCode(diagramModel) {
   const first = classes[0];
   return {
     'schema.sql':            genSchema(classes, relations),
-    'Entity (1ª clase)':     first ? genEntity(first) : '// Sin clases creadas',
+    'Entity (1ª clase)':     first ? genEntity(first, relations, classes) : '// Sin clases creadas',
     'Repository':            first ? genRepository(first) : '// Sin clases creadas',
     'Service':               first ? genService(first) : '// Sin clases creadas',
     'Controller':            first ? genController(first) : '// Sin clases creadas',

@@ -16,6 +16,7 @@ C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\ai\BusinessCh
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\ai\ChatMessageDto.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\ai\ScanDiagramRequest.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\ai\ScanDiagramResponse.java
+C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\ai\TranscribeAudioResponse.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\AiCommandRequest.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\AiDomainResponse.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\dto\AttrModel.java
@@ -45,6 +46,7 @@ C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\AiComman
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\CodeGeneratorService.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\DiagramService.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\DiagramSessionService.java
+C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\NamingUtils.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\NormalizationService.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\PostmanCollectionService.java
 C:\Users\HP\Documents\parcialuno\backend\src\main\java\com\app\services\RoomService.java

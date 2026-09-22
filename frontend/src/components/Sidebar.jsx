@@ -4,6 +4,7 @@ import { saveDiagram, updateDiagram, exportBackendZip, exportPostmanCollection }
 import { generateLocalZip } from '../services/zipExporter.js';
 import { useToast } from '../context/ToastContext.jsx';
 import CodeModal from './CodeModal.jsx';
+import { generateIntermediateClassName, isManyToMany } from '../utils/namingUtils.js';
 
 export default function Sidebar() {
   const {
@@ -18,7 +19,7 @@ export default function Sidebar() {
   const [relFrom, setRelFrom] = useState('');
   const [relTo, setRelTo] = useState('');
   const [relType, setRelType] = useState('association');
-  const [relMult, setRelMult] = useState('1..*');
+  const [relMult, setRelMult] = useState('0..*..1..*');
   const [intermediateTable, setIntermediateTable] = useState('');
 
   const [saving, setSaving] = useState(false);
@@ -29,7 +30,7 @@ export default function Sidebar() {
   function getSuggestedTableName(fromId, toId) {
     const from = classes.find((c) => c.id === fromId);
     const to = classes.find((c) => c.id === toId);
-    if (from && to) return `${from.name}_${to.name}`;
+    if (from && to) return generateIntermediateClassName(from.name, to.name);
     return '';
   }
 
@@ -56,21 +57,43 @@ export default function Sidebar() {
     const isContainer = relType === 'aggregation' || relType === 'composition';
     const effectiveMult = relType === 'inheritance' ? '1..1' : (isContainer ? '1..*' : relMult);
 
+    let srcMult = '1';
+    let tgtMult = '1..*';
+
+    if (effectiveMult === '0..*..1..*') {
+      srcMult = '0..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult === '1..*..1..*') {
+      srcMult = '1..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult === '0..*..0..*') {
+      srcMult = '0..*';
+      tgtMult = '0..*';
+    } else if (effectiveMult === '*..*') {
+      srcMult = '0..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult.includes('..')) {
+      const parts = effectiveMult.split('..');
+      srcMult = parts[0] || '1';
+      tgtMult = parts[1] || '*';
+    }
+
+    const isNM = isManyToMany(srcMult, tgtMult, effectiveMult) && relType !== 'inheritance' && !isContainer;
     const suggested = getSuggestedTableName(relFrom, relTo);
-    const finalTable = (effectiveMult === '*..*' && relType !== 'inheritance')
-      ? (intermediateTable.trim() || suggested || 'Tabla_Intermedia')
-      : '';
+    const finalTable = isNM ? (intermediateTable.trim() || suggested || 'Detalle_Intermedia') : '';
 
     addRelation({
       fromId: relFrom,
       toId: relTo,
-      mult: effectiveMult,
+      sourceMultiplicity: srcMult,
+      targetMultiplicity: tgtMult,
+      mult: `${srcMult}..${tgtMult}`,
       relationType: relType,
       intermediateTableName: finalTable,
     });
 
     const typeNames = {
-      association: 'Asociación',
+      association: isNM ? 'Muchos a Muchos (con Clase Intermedia)' : 'Asociación',
       aggregation: 'Agregación',
       composition: 'Composición',
       inheritance: 'Herencia',
@@ -308,13 +331,16 @@ export default function Sidebar() {
                     value={relMult}
                     onChange={(e) => {
                       setRelMult(e.target.value);
-                      if (e.target.value === '*..*' && !intermediateTable) {
+                      if (e.target.value.includes('*') && !intermediateTable) {
                         setIntermediateTable(getSuggestedTableName(relFrom, relTo));
                       }
                     }}
                   >
+                    <option value="0..*..1..*">0..* a 1..* (N:M con Clase Intermedia)</option>
+                    <option value="1..*..1..*">1..* a 1..* (N:M con Clase Intermedia)</option>
+                    <option value="0..*..0..*">0..* a 0..* (N:M con Clase Intermedia)</option>
+                    <option value="*..*">* a * (N:M con Clase Intermedia)</option>
                     <option value="1..*">1 a muchos (1..*)</option>
-                    <option value="*..*">Muchos a muchos (*..*) [N:M]</option>
                     <option value="1..1">Uno a uno (1..1)</option>
                     <option value="0..1">Cero a uno (0..1)</option>
                     <option value="0..*">Cero a muchos (0..*)</option>
@@ -322,21 +348,22 @@ export default function Sidebar() {
                 </div>
               )}
 
-              {relMult === '*..*' && relType !== 'inheritance' && (
+              {relType !== 'inheritance' && relType !== 'aggregation' && relType !== 'composition' &&
+                (relMult.includes('*..*') || relMult.includes('..*')) && (
                 <div className="form-group">
                   <label className="form-label" htmlFor="rel-intermediate">
-                    Tabla Intermedia (N:M)
+                    Nombre Clase Intermedia
                   </label>
                   <input
                     id="rel-intermediate"
                     type="text"
                     className="form-input"
-                    placeholder={getSuggestedTableName(relFrom, relTo) || 'Origen_Destino'}
+                    placeholder={getSuggestedTableName(relFrom, relTo) || 'Detalle_DocTrib'}
                     value={intermediateTable}
                     onChange={(e) => setIntermediateTable(e.target.value)}
                   />
-                  <span style={{ fontSize: '0.70rem', color: 'var(--color-text-3)', display: 'block', marginTop: '2px' }}>
-                    Generará tabla puente con PK compuesta y dos FKs.
+                  <span style={{ fontSize: '0.70rem', color: 'var(--color-accent)', display: 'block', marginTop: '3px', lineHeight: 1.3 }}>
+                    ✦ Genera automáticamente la clase intermedia con <code>id: Long</code> y conexión discontinua en el lienzo.
                   </span>
                 </div>
               )}

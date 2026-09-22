@@ -252,11 +252,14 @@ public class NormalizationService {
                     continue;
                 }
 
-                // Nombre de la tabla intermedia pivote: <Origen>_<Destino>
+                // Nombre de la clase intermedia: Detalle_DocTrib o explicitTable o fallback de normalización
                 String explicitTable = rel.getEffectiveIntermediateTable();
-                String pivotClassName = (explicitTable != null && !explicitTable.isBlank())
-                        ? sanitizeClassName(explicitTable)
-                        : sanitizeClassName(fromClass.getName()) + "_" + sanitizeClassName(toClass.getName());
+                String pivotClassName;
+                if (explicitTable != null && !explicitTable.isBlank()) {
+                    pivotClassName = explicitTable;
+                } else {
+                    pivotClassName = fromClass.getName() + "_" + toClass.getName();
+                }
 
                 String pivotId = "pivot_" + pivotClassName.toLowerCase(Locale.ROOT);
 
@@ -364,26 +367,7 @@ public class NormalizationService {
 
     private boolean isManyToManyRelation(RelationModel rel) {
         if (rel == null) return false;
-
-        if (rel.getEffectiveIntermediateTable() != null) {
-            return true;
-        }
-
-        String mult = rel.getMult() != null ? rel.getMult().trim().toLowerCase(Locale.ROOT) : "";
-        if (mult.contains("*..*") || mult.contains("n..m") || mult.contains("m..n")
-                || mult.contains("n:m") || mult.contains("m:n")
-                || mult.contains("many-to-many") || mult.contains("muchos a muchos")
-                || mult.contains("* a *") || mult.equals("*")) {
-            return true;
-        }
-
-        String src = rel.getSourceMultiplicity() != null ? rel.getSourceMultiplicity().trim().toLowerCase(Locale.ROOT) : "";
-        String tgt = rel.getTargetMultiplicity() != null ? rel.getTargetMultiplicity().trim().toLowerCase(Locale.ROOT) : "";
-
-        boolean srcMany = src.equals("*") || src.contains("..*") || src.equals("m") || src.equals("n");
-        boolean tgtMany = tgt.equals("*") || tgt.contains("..*") || tgt.equals("m") || tgt.equals("n");
-
-        return srcMany && tgtMany;
+        return rel.isManyToMany();
     }
 
     // =========================================================================
@@ -542,6 +526,7 @@ public class NormalizationService {
                 cc.setY(c.getY());
                 cc.setVersion(c.getVersion());
                 cc.setIsPivotTable(c.getIsPivotTable());
+                cc.setIsIntermediate(c.getIsIntermediate());
                 if (c.getPrimaryKeyColumns() != null) {
                     cc.setPrimaryKeyColumns(new ArrayList<>(c.getPrimaryKeyColumns()));
                 }
@@ -580,6 +565,8 @@ public class NormalizationService {
                 rc.setRelationType(r.getRelationType());
                 rc.setIntermediateTable(r.getIntermediateTable());
                 rc.setIntermediateTableName(r.getIntermediateTableName());
+                rc.setIntermediateClassId(r.getIntermediateClassId());
+                rc.setIntermediateClassName(r.getIntermediateClassName());
                 rc.setSourceMultiplicity(r.getSourceMultiplicity());
                 rc.setTargetMultiplicity(r.getTargetMultiplicity());
                 rc.setVersion(r.getVersion());

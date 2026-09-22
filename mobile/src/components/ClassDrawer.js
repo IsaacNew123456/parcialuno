@@ -13,6 +13,8 @@ import {
   Platform,
 } from 'react-native';
 
+import { generateIntermediateClassName, isManyToMany } from '../utils/namingUtils';
+
 const DRAWER_WIDTH = Math.min(Dimensions.get('window').width * 0.90, 360);
 
 const RELATION_TYPES = [
@@ -23,8 +25,11 @@ const RELATION_TYPES = [
 ];
 
 const MULTIPLICITIES = [
+  { id: '0..*..1..*', label: '0..* a 1..* (N:M con Clase Intermedia)' },
+  { id: '1..*..1..*', label: '1..* a 1..* (N:M con Clase Intermedia)' },
+  { id: '0..*..0..*', label: '0..* a 0..* (N:M con Clase Intermedia)' },
+  { id: '*..*', label: '* a * (N:M con Clase Intermedia)' },
   { id: '1..*', label: '1 a muchos (1..*)' },
-  { id: '*..*', label: 'Muchos a muchos (*..*) [N:M]' },
   { id: '1..1', label: 'Uno a uno (1..1)' },
   { id: '0..1', label: 'Cero a uno (0..1)' },
   { id: '0..*', label: 'Cero a muchos (0..*)' },
@@ -53,6 +58,7 @@ export default function ClassDrawer({
   onDeleteRelation,
   onOpenBusinessChat,
   onOpenScanDiagram,
+  onLogout,
 }) {
   const [activeTab, setActiveTab] = useState('classes'); // 'classes' | 'relations'
 
@@ -92,12 +98,12 @@ export default function ClassDrawer({
     }
   }, [classes, relFrom, relTo]);
 
-  // Suggested bridge table name for *..*
+  // Suggested bridge table name for *..* / N:M
   const getSuggestedBridgeName = useCallback((fromId, toId) => {
     const fromCls = classes.find(c => String(c.id) === String(fromId));
     const toCls = classes.find(c => String(c.id) === String(toId));
     if (!fromCls || !toCls) return '';
-    return `${fromCls.name}_${toCls.name}`;
+    return generateIntermediateClassName(fromCls.name, toCls.name);
   }, [classes]);
 
   // ── Attribute helpers ────────────────────────────────────────────
@@ -140,16 +146,40 @@ export default function ClassDrawer({
     const isContainer = relType === 'aggregation' || relType === 'composition';
     const effectiveMult = relType === 'inheritance' ? '1..1' : (isContainer ? '1..*' : relMult);
 
+    let srcMult = '1';
+    let tgtMult = '1..*';
+
+    if (effectiveMult === '0..*..1..*') {
+      srcMult = '0..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult === '1..*..1..*') {
+      srcMult = '1..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult === '0..*..0..*') {
+      srcMult = '0..*';
+      tgtMult = '0..*';
+    } else if (effectiveMult === '*..*') {
+      srcMult = '0..*';
+      tgtMult = '1..*';
+    } else if (effectiveMult.includes('..')) {
+      const parts = effectiveMult.split('..');
+      srcMult = parts[0] || '1';
+      tgtMult = parts[1] || '*';
+    }
+
+    const isNM = isManyToMany(srcMult, tgtMult, effectiveMult) && relType !== 'inheritance' && !isContainer;
     const suggested = getSuggestedBridgeName(relFrom, relTo);
-    const finalTable = (effectiveMult === '*..*' && relType !== 'inheritance')
-      ? (intermediateTable.trim() || suggested || 'Tabla_Intermedia')
+    const finalTable = isNM
+      ? (intermediateTable.trim() || suggested || 'Detalle_Intermedia')
       : '';
 
     onAddRelation?.({
       fromId: relFrom,
       toId: relTo,
       relationType: relType,
-      mult: effectiveMult,
+      sourceMultiplicity: srcMult,
+      targetMultiplicity: tgtMult,
+      mult: `${srcMult}..${tgtMult}`,
       intermediateTableName: finalTable,
     });
 
@@ -589,6 +619,19 @@ export default function ClassDrawer({
                   )}
                 </View>
               </ScrollView>
+            )}
+            {onLogout && (
+              <View style={styles.drawerFooter}>
+                <TouchableOpacity
+                  style={styles.drawerLogoutBtn}
+                  onPress={onLogout}
+                  accessibilityLabel="Cerrar sesión"
+                  accessibilityRole="button"
+                >
+                  <Text style={styles.drawerLogoutIcon}>🚪</Text>
+                  <Text style={styles.drawerLogoutText}>Cerrar sesión</Text>
+                </TouchableOpacity>
+              </View>
             )}
           </KeyboardAvoidingView>
         </Animated.View>
@@ -1244,5 +1287,31 @@ const styles = StyleSheet.create({
     color: '#64748b',
     fontSize: 10,
     lineHeight: 13,
+  },
+  drawerFooter: {
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#1e293b',
+    backgroundColor: '#0b1120',
+  },
+  drawerLogoutBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(239, 68, 68, 0.15)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.35)',
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  drawerLogoutIcon: {
+    fontSize: 16,
+  },
+  drawerLogoutText: {
+    color: '#f87171',
+    fontSize: 14,
+    fontWeight: '700',
   },
 });

@@ -275,4 +275,62 @@ class SpringBootProjectGeneratorServiceTest {
                 .anyMatch(k -> k.contains("controllers/EstudianteCursoController.java") || k.contains("controllers/Estudiante_CursoController.java"));
         assertTrue(hasPivotController, "Debe haberse generado el controlador de la tabla pivote intermedia");
     }
+
+    @Test
+    void generatesManyToManyIntermediateClassWithManyToOneAndOneToMany() throws Exception {
+        DiagramModel model = new DiagramModel();
+
+        ClassModel docente = new ClassModel();
+        docente.setId("c_doc");
+        docente.setName("Docente");
+        model.getClasses().add(docente);
+
+        ClassModel tribunal = new ClassModel();
+        tribunal.setId("c_trib");
+        tribunal.setName("Tribunal");
+        model.getClasses().add(tribunal);
+
+        RelationModel rel = new RelationModel();
+        rel.setId("r_doc_trib");
+        rel.setFromId("c_doc");
+        rel.setFromName("Docente");
+        rel.setToId("c_trib");
+        rel.setToName("Tribunal");
+        rel.setSourceMultiplicity("0..*");
+        rel.setTargetMultiplicity("1..*");
+        rel.setMult("0..*..1..*");
+        rel.setIntermediateClassName("Detalle_DocTrib");
+        model.getRelations().add(rel);
+
+        byte[] zipBytes = generator.generateProjectZip(model);
+        assertNotNull(zipBytes);
+
+        Map<String, String> files = new HashMap<>();
+        try (ZipInputStream in = new ZipInputStream(new ByteArrayInputStream(zipBytes), StandardCharsets.UTF_8)) {
+            ZipEntry entry;
+            while ((entry = in.getNextEntry()) != null) {
+                byte[] content = in.readAllBytes();
+                files.put(entry.getName(), new String(content, StandardCharsets.UTF_8));
+            }
+        }
+
+        // 4 layers for intermediate class Detalle_DocTrib
+        assertTrue(files.containsKey("src/main/java/com/example/generated/models/Detalle_DocTrib.java"), "Debe generar entidad Detalle_DocTrib");
+        assertTrue(files.containsKey("src/main/java/com/example/generated/repositories/Detalle_DocTribRepository.java"), "Debe generar repositorio");
+        assertTrue(files.containsKey("src/main/java/com/example/generated/services/Detalle_DocTribService.java"), "Debe generar servicio");
+        assertTrue(files.containsKey("src/main/java/com/example/generated/controllers/Detalle_DocTribController.java"), "Debe generar controlador");
+
+        String detalleModel = files.get("src/main/java/com/example/generated/models/Detalle_DocTrib.java");
+        assertTrue(detalleModel.contains("@ManyToOne"), "Detalle_DocTrib debe tener @ManyToOne");
+        assertTrue(detalleModel.contains("private Docente docente;"));
+        assertTrue(detalleModel.contains("private Tribunal tribunal;"));
+
+        String docenteModel = files.get("src/main/java/com/example/generated/models/Docente.java");
+        assertTrue(docenteModel.contains("@OneToMany(mappedBy = \"docente\""), "Docente debe tener mappedBy = docente");
+        assertTrue(docenteModel.contains("List<Detalle_DocTrib> detalleDocTribList"));
+
+        String tribunalModel = files.get("src/main/java/com/example/generated/models/Tribunal.java");
+        assertTrue(tribunalModel.contains("@OneToMany(mappedBy = \"tribunal\""), "Tribunal debe tener mappedBy = tribunal");
+        assertTrue(tribunalModel.contains("List<Detalle_DocTrib> detalleDocTribList"));
+    }
 }

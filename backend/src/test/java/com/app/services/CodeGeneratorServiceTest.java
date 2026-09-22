@@ -179,4 +179,68 @@ class CodeGeneratorServiceTest {
         assertTrue(sql.contains("CONSTRAINT fk_estudiante_curso_estudiante"));
         assertTrue(sql.contains("CONSTRAINT fk_estudiante_curso_curso"));
     }
+
+    @Test
+    void buildProjectZipWithManyToManyIntermediateClass() throws Exception {
+        DiagramModel model = new DiagramModel();
+
+        ClassModel docente = new ClassModel();
+        docente.setId("cls_doc");
+        docente.setName("Docente");
+        model.getClasses().add(docente);
+
+        ClassModel tribunal = new ClassModel();
+        tribunal.setId("cls_trib");
+        tribunal.setName("Tribunal");
+        model.getClasses().add(tribunal);
+
+        RelationModel nmRel = new RelationModel();
+        nmRel.setFromId("cls_doc");
+        nmRel.setFromName("Docente");
+        nmRel.setToId("cls_trib");
+        nmRel.setToName("Tribunal");
+        nmRel.setSourceMultiplicity("0..*");
+        nmRel.setTargetMultiplicity("1..*");
+        nmRel.setMult("0..*..1..*");
+        nmRel.setIntermediateClassName("Detalle_DocTrib");
+        model.getRelations().add(nmRel);
+
+        CodeGeneratorService generator = new CodeGeneratorService(new ObjectMapper());
+        byte[] zipBytes = generator.buildZip(model);
+        assertNotNull(zipBytes);
+
+        Map<String, String> files = new HashMap<>();
+        try (java.util.zip.ZipInputStream in = new java.util.zip.ZipInputStream(new java.io.ByteArrayInputStream(zipBytes), java.nio.charset.StandardCharsets.UTF_8)) {
+            java.util.zip.ZipEntry entry;
+            while ((entry = in.getNextEntry()) != null) {
+                byte[] content = in.readAllBytes();
+                files.put(entry.getName().replace("spring-boot-backend/", ""), new String(content, java.nio.charset.StandardCharsets.UTF_8));
+            }
+        }
+
+        // Entity Detalle_DocTrib
+        assertTrue(files.containsKey("src/main/java/com/app/entities/Detalle_DocTrib.java"), "Debe generar la entidad Detalle_DocTrib");
+        String detalleSource = files.get("src/main/java/com/app/entities/Detalle_DocTrib.java");
+        assertTrue(detalleSource.contains("private Long id;"), "Debe tener PK surrogate id Long");
+        assertTrue(detalleSource.contains("@ManyToOne"), "Debe tener anotación @ManyToOne");
+        assertTrue(detalleSource.contains("private Docente docente;"), "Debe tener relación hacia Docente");
+        assertTrue(detalleSource.contains("private Tribunal tribunal;"), "Debe tener relación hacia Tribunal");
+
+        // Parents with @OneToMany
+        String docenteSource = files.get("src/main/java/com/app/entities/Docente.java");
+        assertTrue(docenteSource.contains("@OneToMany(mappedBy = \"docente\")"), "Docente debe tener mappedBy = docente");
+        assertTrue(docenteSource.contains("List<Detalle_DocTrib>"), "Docente debe tener lista de Detalle_DocTrib");
+
+        String tribunalSource = files.get("src/main/java/com/app/entities/Tribunal.java");
+        assertTrue(tribunalSource.contains("@OneToMany(mappedBy = \"tribunal\")"), "Tribunal debe tener mappedBy = tribunal");
+        assertTrue(tribunalSource.contains("List<Detalle_DocTrib>"), "Tribunal debe tener lista de Detalle_DocTrib");
+
+        // SQL Schema
+        String sql = files.get("schema.sql");
+        assertTrue(sql.contains("CREATE TABLE IF NOT EXISTS detalle_doc_trib"), "schema.sql debe crear tabla detalle_doc_trib");
+        assertTrue(sql.contains("docente_id BIGINT NOT NULL"));
+        assertTrue(sql.contains("tribunal_id BIGINT NOT NULL"));
+        assertTrue(sql.contains("fk_detalle_doc_trib_docente") && sql.contains("ON DELETE CASCADE"));
+        assertTrue(sql.contains("fk_detalle_doc_trib_tribunal") && sql.contains("ON DELETE CASCADE"));
+    }
 }

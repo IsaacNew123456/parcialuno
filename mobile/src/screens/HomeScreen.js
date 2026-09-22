@@ -42,6 +42,7 @@ import {
   fetchRoomByCode,
 } from '../services/diagramApi';
 import { API_BASE_URL } from '../config/api';
+import { generateIntermediateClassName, isManyToMany } from '../utils/namingUtils';
 
 // ── Canvas dimensions ──────────────────────────────────────────────
 const CANVAS_WIDTH = 2000;
@@ -52,7 +53,19 @@ let _localId = 1;
 function nextLocalId() { return `local_${_localId++}`; }
 
 // ── Component ──────────────────────────────────────────────────────
-export default function HomeScreen() {
+export default function HomeScreen({ onLogout }) {
+  // ── Logout handler (fachada directa al Login) ──────────────────
+  const handleLogout = useCallback(() => {
+    Alert.alert(
+      'Cerrar sesión',
+      '¿Deseas salir y volver a la pantalla de inicio de sesión?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        { text: 'Cerrar sesión', style: 'destructive', onPress: () => onLogout?.() },
+      ]
+    );
+  }, [onLogout]);
+
   // ── Room & Diagram selection ───────────────────────────────────
   const [activeRoom, setActiveRoom] = useState({ id: 1, code: '1234', name: 'Sala Principal', diagramId: 1 });
   const [roomCodeInput, setRoomCodeInput] = useState('');
@@ -324,6 +337,46 @@ export default function HomeScreen() {
     const relType = relData.relationType || 'association';
     const mult = relData.mult || '1..*';
     const isInheritance = relType === 'inheritance';
+    const isContainer = relType === 'composition' || relType === 'aggregation';
+
+    let srcMult = isInheritance ? '' : (isContainer ? '1' : (relData.sourceMultiplicity || (mult.includes('..') ? mult.split('..')[0] : '0..*')));
+    let tgtMult = isInheritance ? '' : (isContainer ? '*' : (relData.targetMultiplicity || (mult.includes('..') ? mult.split('..')[1] : '1..*')));
+
+    const isNM = !isInheritance && !isContainer && isManyToMany(srcMult, tgtMult, mult);
+
+    let resolvedInterName = '';
+    let resolvedInterClassId = relData.intermediateClassId;
+
+    if (isNM) {
+      resolvedInterName = (relData.intermediateTableName || '').trim() || generateIntermediateClassName(fromClass.name, toClass.name);
+
+      let interClass = resolvedInterClassId ? classes.find(c => String(c.id) === String(resolvedInterClassId)) : null;
+      if (!interClass) {
+        interClass = classes.find(c => c.name?.toLowerCase() === resolvedInterName.toLowerCase());
+      }
+
+      if (!interClass) {
+        const interId = `cls_inter_${Date.now()}_${Math.random().toString(36).slice(2, 5)}`;
+        const midX = Math.round(((fromClass.x || 0) + (toClass.x || 0)) / 2);
+        const midY = Math.round(((fromClass.y || 0) + (toClass.y || 0)) / 2 + 100);
+
+        interClass = {
+          id: interId,
+          name: resolvedInterName,
+          attrs: [{ name: 'id', type: 'Long' }],
+          x: midX,
+          y: midY,
+          version: 0,
+          isIntermediate: true,
+        };
+
+        setClasses(prev => [...prev, interClass]);
+        wsClient.publishClassCreated(interClass);
+      }
+
+      resolvedInterClassId = interClass.id;
+      resolvedInterName = interClass.name;
+    }
 
     const newRelation = {
       id,
@@ -334,11 +387,13 @@ export default function HomeScreen() {
       fromName: fromClass.name,
       toName: toClass.name,
       relationType: relType,
-      mult,
-      sourceMultiplicity: isInheritance ? '' : (mult.includes('..') ? mult.split('..')[0] : '1'),
-      targetMultiplicity: isInheritance ? '' : (mult.includes('..') ? mult.split('..')[1] : mult),
-      intermediateTableName: relData.intermediateTableName || '',
-      label: isInheritance ? 'Herencia' : mult,
+      mult: `${srcMult}..${tgtMult}`,
+      sourceMultiplicity: srcMult,
+      targetMultiplicity: tgtMult,
+      intermediateClassId: resolvedInterClassId || undefined,
+      intermediateClassName: resolvedInterName || undefined,
+      intermediateTableName: resolvedInterName || '',
+      label: isInheritance ? 'Herencia' : `${srcMult}..${tgtMult}`,
       version: 0,
       roomId: activeRoom?.id,
     };
@@ -592,6 +647,17 @@ export default function HomeScreen() {
         >
           <Text style={styles.trashIcon}>🗑</Text>
         </TouchableOpacity>
+
+        {onLogout && (
+          <TouchableOpacity
+            onPress={handleLogout}
+            style={[styles.topBarBtn, styles.logoutBtn]}
+            accessibilityLabel="Cerrar sesión"
+            accessibilityRole="button"
+          >
+            <Text style={styles.logoutIcon}>🚪</Text>
+          </TouchableOpacity>
+        )}
       </View>
 
       {/* ── Collaborative Room Bar (Parte superior del lienzo) ── */}
@@ -769,6 +835,7 @@ export default function HomeScreen() {
         onDeleteRelation={handleDeleteRelation}
         onOpenBusinessChat={() => setBusinessChatOpen(true)}
         onOpenScanDiagram={() => setScanDiagramOpen(true)}
+        onLogout={onLogout ? () => { setDrawerOpen(false); handleLogout(); } : undefined}
       />
 
       {/* ── Chatbot de IA Empresarial (gemma2:2b) ── */}
@@ -890,6 +957,12 @@ const styles = StyleSheet.create({
     alignItems: 'center', justifyContent: 'center',
     borderRadius: 8, backgroundColor: '#334155',
   },
+  logoutBtn: {
+    backgroundColor: 'rgba(239, 68, 68, 0.2)',
+    borderWidth: 1,
+    borderColor: 'rgba(239, 68, 68, 0.4)',
+  },
+  logoutIcon: { fontSize: 16 },
   topBarTitleGroup: { flex: 1 },
   topBarTitle: { color: '#f8fafc', fontSize: 14, fontWeight: '700', letterSpacing: 0.3 },
   topBarSubtitleRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginTop: 2 },

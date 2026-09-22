@@ -88,7 +88,6 @@ export default function RelationsLayer({ classes, relations, width, height }) {
 
         // ── Etiquetas en extremos ─────────────────────────────────────────
         const mult   = (rel.mult || '').trim();
-        const bridge = (rel.intermediateTableName || '').trim();
         let sourceLabel = '';
         let targetLabel = '';
 
@@ -98,14 +97,21 @@ export default function RelationsLayer({ classes, relations, width, height }) {
           sourceLabel = '1';
           targetLabel = mult || '1..*';
         } else {
-          // association
-          const parts = mult ? mult.split('..') : [];
-          sourceLabel = parts.length > 0 ? parts[0] : '';
-          targetLabel = parts.length > 1 ? parts[1] : (parts[0] || (rel.label || ''));
-          if (bridge) {
-            targetLabel = targetLabel ? `${targetLabel} [${bridge}]` : `[${bridge}]`;
+          // association / N:M
+          if (rel.sourceMultiplicity || rel.targetMultiplicity) {
+            sourceLabel = rel.sourceMultiplicity || '';
+            targetLabel = rel.targetMultiplicity || '';
+          } else {
+            const parts = mult ? mult.split('..') : [];
+            sourceLabel = parts.length > 0 ? parts[0] : '';
+            targetLabel = parts.length > 1 ? parts[1] : (parts[0] || (rel.label || ''));
           }
         }
+
+        // ── Identificar clase intermedia si existe ────────────────────────
+        const interClass = (rel.intermediateClassId && byId[String(rel.intermediateClassId)]) ||
+          (rel.intermediateClassName && classes.find(c => c.name?.toLowerCase() === rel.intermediateClassName.toLowerCase())) ||
+          (rel.intermediateTableName && classes.find(c => c.name?.toLowerCase() === rel.intermediateTableName.toLowerCase()));
 
         // ── Color según tipo ──────────────────────────────────────────────
         let strokeColor = '#38bdf8'; // Sky blue (asociación)
@@ -137,8 +143,8 @@ export default function RelationsLayer({ classes, relations, width, height }) {
 
         } else if (relType === 'composition') {
           // Rombo RELLENO (sólido) pegado al borde del nodo contenedor 'from'
-          const vTip  = { x: x1, y: y1 }; // vértice anclado al borde
-          const vOpp  = { x: x1 + ux * DIAMOND_LEN, y: y1 + uy * DIAMOND_LEN }; // vértice opuesto
+          const vTip  = { x: x1, y: y1 };
+          const vOpp  = { x: x1 + ux * DIAMOND_LEN, y: y1 + uy * DIAMOND_LEN };
           const midX  = x1 + ux * (DIAMOND_LEN / 2);
           const midY  = y1 + uy * (DIAMOND_LEN / 2);
           const side1 = { x: midX + px * DIAMOND_WIDTH, y: midY + py * DIAMOND_WIDTH };
@@ -152,7 +158,7 @@ export default function RelationsLayer({ classes, relations, width, height }) {
               strokeLinejoin="round"
             />
           );
-          lineStart = vOpp; // la línea arranca desde el vértice opuesto del rombo
+          lineStart = vOpp;
 
         } else if (relType === 'aggregation') {
           // Rombo VACÍO (hueco) pegado al borde del nodo contenedor 'from'
@@ -190,9 +196,27 @@ export default function RelationsLayer({ classes, relations, width, height }) {
           );
         }
 
+        // ── Punto medio de la relación principal ─────────────────────────
+        const midRelX = (lineStart.x + lineEnd.x) / 2;
+        const midRelY = (lineStart.y + lineEnd.y) / 2;
+
+        // ── Intersección con la clase intermedia si existe ───────────────
+        let interConnector = null;
+        if (interClass) {
+          const interH = estimateCardHeight(interClass);
+          const interCx = (interClass.x || 0) + CARD_WIDTH / 2;
+          const interCy = (interClass.y || 0) + interH / 2;
+          const interEdge = clampToCardEdge(interCx, interCy, midRelX, midRelY,
+                                            interClass.x || 0, interClass.y || 0, CARD_WIDTH, interH);
+          interConnector = {
+            x1: midRelX,
+            y1: midRelY,
+            x2: interEdge.x,
+            y2: interEdge.y,
+          };
+        }
+
         // ── Posición de etiquetas en los extremos de la línea ─────────────
-        // Se colocan a LABEL_OFFSET px del borde del nodo, desplazadas
-        // perpendicularmente para no tapar la línea.
         const LABEL_OFFSET = 28;
         const PERP_OFFSET  =  9;
         const srcLX = x1 + ux * LABEL_OFFSET + px * PERP_OFFSET;
@@ -203,7 +227,20 @@ export default function RelationsLayer({ classes, relations, width, height }) {
         return (
           <G key={rel.id != null ? String(rel.id) : `rel-${idx}`}>
 
-            {/* ── Línea de conexión ── */}
+            {/* ── Línea discontinua punteada hacia la clase intermedia ── */}
+            {interConnector && (
+              <Line
+                x1={interConnector.x1}
+                y1={interConnector.y1}
+                x2={interConnector.x2}
+                y2={interConnector.y2}
+                stroke={strokeColor}
+                strokeWidth={1.5}
+                strokeDasharray="6,4"
+              />
+            )}
+
+            {/* ── Línea principal continua de conexión ── */}
             <Line
               x1={lineStart.x}
               y1={lineStart.y}
@@ -211,13 +248,12 @@ export default function RelationsLayer({ classes, relations, width, height }) {
               y2={lineEnd.y}
               stroke={strokeColor}
               strokeWidth={1.5}
-              strokeDasharray={rel.dashed ? '6,4' : undefined}
             />
 
             {/* ── Terminador UML ── */}
             {marker}
 
-            {/* ── Etiqueta extremo ORIGEN (multiplicidad source, ej. "1") ── */}
+            {/* ── Etiqueta extremo ORIGEN (multiplicidad source, ej. "0..*") ── */}
             {sourceLabel !== '' && (
               <SvgText
                 x={srcLX}
@@ -233,7 +269,7 @@ export default function RelationsLayer({ classes, relations, width, height }) {
               </SvgText>
             )}
 
-            {/* ── Etiqueta extremo DESTINO (mult target / nombre / bridge) ── */}
+            {/* ── Etiqueta extremo DESTINO (multiplicidad target, ej. "1..*") ── */}
             {targetLabel !== '' && (
               <SvgText
                 x={dstLX}

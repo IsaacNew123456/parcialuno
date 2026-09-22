@@ -290,8 +290,20 @@ export default function UmlCanvas() {
           const to   = classes.find((c) => c.id === rel.toId || c.id === rel.targetId);
           if (!from || !to) return null;
 
+          const interClass = classes.find((c) =>
+            (rel.intermediateClassId && c.id === rel.intermediateClassId) ||
+            (rel.intermediateClassName && c.name.toLowerCase() === rel.intermediateClassName.toLowerCase()) ||
+            (rel.intermediateTableName && c.name.toLowerCase() === rel.intermediateTableName.toLowerCase())
+          );
+
           return (
-            <RelationLine key={rel.id} from={from} to={to} relation={rel} />
+            <RelationLine
+              key={rel.id}
+              from={from}
+              to={to}
+              relation={rel}
+              intermediateClass={interClass}
+            />
           );
         })}
       </svg>
@@ -350,7 +362,7 @@ function getCardIntersection(card, targetPoint, cardW, cardH) {
   }
 }
 
-function RelationLine({ from, to, relation }) {
+function RelationLine({ from, to, relation, intermediateClass }) {
   const fromH = getCardHeight(from);
   const toH = getCardHeight(to);
 
@@ -385,7 +397,6 @@ function RelationLine({ from, to, relation }) {
   const isComposition = type === 'composition';
   const isAggregation = type === 'aggregation';
   const isContainerRel = isComposition || isAggregation;
-  const isManyToMany = relation.mult === '*..*' || !!relation.intermediateTableName;
 
   // Tangente en el origen (t = 0) para orientar el rombo exactamente a lo largo de la línea
   const vx = cx - start.x;
@@ -393,10 +404,9 @@ function RelationLine({ from, to, relation }) {
   const angleDeg = (Math.atan2(vy, vx) * 180) / Math.PI;
 
   const markerEnd = isInheritance ? 'url(#marker-inheritance)' : 'url(#marker-association)';
-  const strokeDash = isManyToMany ? '5 3' : undefined;
 
-  // En Composición y Agregación, la multiplicidad es estrictamente 1 a muchos (1 en origen, * en destino)
-  const srcMult = isInheritance ? '' : (isContainerRel ? '1' : (relation.sourceMultiplicity || (relation.mult && relation.mult.includes('..') ? relation.mult.split('..')[0] : '1')));
+  // Multiplicidades en los extremos
+  const srcMult = isInheritance ? '' : (isContainerRel ? '1' : (relation.sourceMultiplicity || (relation.mult && relation.mult.includes('..') ? relation.mult.split('..')[0] : '0..*')));
   const tgtMult = isInheritance ? '' : (isContainerRel ? '*' : (relation.targetMultiplicity || (relation.mult && relation.mult.includes('..') ? relation.mult.split('..')[1] : (relation.mult || '1..*'))));
 
   // Puntos calculados a lo largo de la curva cuadrática
@@ -411,14 +421,49 @@ function RelationLine({ from, to, relation }) {
   const mxBez = 0.25 * start.x + 0.5 * cx + 0.25 * end.x;
   const myBez = 0.25 * start.y + 0.5 * cy + 0.25 * end.y;
 
+  // Intersección con la clase intermedia si existe
+  let interLine = null;
+  if (intermediateClass) {
+    const interH = getCardHeight(intermediateClass);
+    const interEdge = getCardIntersection(intermediateClass, { x: mxBez, y: myBez }, CARD_W, interH);
+    interLine = {
+      x1: mxBez,
+      y1: myBez,
+      x2: interEdge.x,
+      y2: interEdge.y,
+    };
+  }
+
   return (
     <g className={`relation-group relation-${type}`}>
+      {/* Línea discontinua (punteada) hacia la Clase Intermedia (UML estándar) */}
+      {interLine && (
+        <g className="relation-intermediate-connector">
+          <line
+            x1={interLine.x1}
+            y1={interLine.y1}
+            x2={interLine.x2}
+            y2={interLine.y2}
+            stroke="var(--color-accent, #5b8dee)"
+            strokeWidth="1.8"
+            strokeDasharray="5 4"
+            opacity="0.95"
+          />
+          <circle
+            cx={interLine.x1}
+            cy={interLine.y1}
+            r="3"
+            fill="var(--color-accent, #5b8dee)"
+          />
+        </g>
+      )}
+
+      {/* Línea principal continua entre clases de origen y destino */}
       <path
         d={d}
         className="svg-arrow"
         stroke="var(--color-accent, #5b8dee)"
         strokeWidth="1.8"
-        strokeDasharray={strokeDash}
         opacity="0.9"
         markerEnd={markerEnd}
       />
@@ -449,7 +494,7 @@ function RelationLine({ from, to, relation }) {
         </text>
       ) : (
         <>
-          {/* Multiplicidad en Origen */}
+          {/* Multiplicidad en Origen (ej. 0..*) */}
           <text
             x={sx}
             y={sy - 8}
@@ -460,7 +505,7 @@ function RelationLine({ from, to, relation }) {
             {srcMult}
           </text>
 
-          {/* Multiplicidad en Destino */}
+          {/* Multiplicidad en Destino (ej. 1..*) */}
           <text
             x={ex}
             y={ey - 8}
@@ -470,33 +515,6 @@ function RelationLine({ from, to, relation }) {
           >
             {tgtMult}
           </text>
-
-          {/* Etiqueta central de Tabla Intermedia en N:M */}
-          {isManyToMany && relation.intermediateTableName && (
-            <g transform={`translate(${mxBez}, ${myBez - 12})`}>
-              <rect
-                x="-46"
-                y="-10"
-                width="92"
-                height="18"
-                rx="4"
-                fill="var(--color-surface, #181b24)"
-                stroke="var(--color-accent, #5b8dee)"
-                strokeWidth="0.8"
-                opacity="0.95"
-              />
-              <text
-                x="0"
-                y="3"
-                className="svg-arrow-label"
-                textAnchor="middle"
-                fill="var(--color-accent, #5b8dee)"
-                style={{ fontSize: '9px', fontWeight: 600 }}
-              >
-                {relation.intermediateTableName}
-              </text>
-            </g>
-          )}
         </>
       )}
     </g>

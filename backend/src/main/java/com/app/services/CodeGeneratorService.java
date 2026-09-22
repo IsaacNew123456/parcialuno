@@ -127,12 +127,79 @@ public class CodeGeneratorService {
                 }
             }
         }
+
+        // Auto-materializar clase intermedia para relaciones Muchos a Muchos (N:M)
         for (RelationModel rel : model.getRelations()) {
             if (rel.getMult() == null || rel.getMult().isBlank()) {
                 rel.setMult("1..*");
             }
+            if (rel.isManyToMany()) {
+                // Si la relación tiene una tabla intermedia SQL directa (e.g. intermediateTable="estudiante_curso") sin clase intermedia, mantenerla como puente SQL
+                if (rel.getIntermediateTable() != null && !rel.getIntermediateTable().isBlank()
+                        && (rel.getIntermediateClassId() == null || rel.getIntermediateClassId().isBlank())
+                        && (rel.getIntermediateClassName() == null || rel.getIntermediateClassName().isBlank())) {
+                    continue;
+                }
+                ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                if (from != null && to != null) {
+                    String interName = rel.getIntermediateClassName();
+                    if (interName == null || interName.isBlank()) {
+                        String eff = rel.getEffectiveIntermediateTable();
+                        if (eff != null && !eff.isBlank()) {
+                            interName = eff;
+                        } else {
+                            interName = NamingUtils.generateIntermediateClassName(from.getName(), to.getName());
+                        }
+                        rel.setIntermediateClassName(interName);
+                    }
+                    interName = toPascal(interName);
+
+                    ClassModel interCls = resolveIntermediateClass(model, rel);
+                    if (interCls == null) {
+                        interCls = new ClassModel();
+                        interCls.setId(interName);
+                        interCls.setName(interName);
+                        interCls.setIntermediate(true);
+                        AttrModel idAttr = new AttrModel();
+                        idAttr.setName("id");
+                        idAttr.setType("Long");
+                        interCls.setAttrs(new ArrayList<>(List.of(idAttr)));
+                        model.getClasses().add(interCls);
+                    }
+                    rel.setIntermediateClassId(interCls.getId());
+                    rel.setIntermediateClassName(interCls.getName());
+                }
+            }
         }
         return model;
+    }
+
+    private ClassModel resolveIntermediateClass(DiagramModel model, RelationModel rel) {
+        if (!rel.isManyToMany()) {
+            return null;
+        }
+        String interId = rel.getIntermediateClassId();
+        String interName = rel.getIntermediateClassName();
+        for (ClassModel c : model.getClasses()) {
+            if (interId != null && !interId.isBlank() && interId.equalsIgnoreCase(c.getId())) {
+                return c;
+            }
+            if (interName != null && !interName.isBlank() && interName.equalsIgnoreCase(c.getName())) {
+                return c;
+            }
+        }
+        ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+        ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+        if (from != null && to != null) {
+            String genName = NamingUtils.generateIntermediateClassName(from.getName(), to.getName());
+            for (ClassModel c : model.getClasses()) {
+                if (genName.equalsIgnoreCase(c.getName())) {
+                    return c;
+                }
+            }
+        }
+        return null;
     }
 
     private ClassModel resolveEnd(DiagramModel model, String id, String name) {
@@ -159,8 +226,8 @@ public class CodeGeneratorService {
     }
 
     private Association fkSide(DiagramModel model, RelationModel rel) {
-        if ("*..*".equals(rel.getMult()) || rel.getEffectiveIntermediateTable() != null) {
-            return null; // Relaciones N:M se materializan en tablas intermedias / puente
+        if (rel.isManyToMany() || "*..*".equals(rel.getMult()) || rel.getEffectiveIntermediateTable() != null) {
+            return null; // Relaciones N:M se materializan en clases / tablas intermedias
         }
         ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
         ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
@@ -176,6 +243,16 @@ public class CodeGeneratorService {
     private List<ClassModel> manyToOneOf(ClassModel cls, DiagramModel model) {
         List<ClassModel> result = new ArrayList<>();
         for (RelationModel rel : model.getRelations()) {
+            if (rel.isManyToMany()) {
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                if (inter != null && (inter.getId().equals(cls.getId()) || inter.getName().equalsIgnoreCase(cls.getName()))) {
+                    ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                    ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                    if (from != null && !result.contains(from)) result.add(from);
+                    if (to != null && !result.contains(to)) result.add(to);
+                }
+                continue;
+            }
             Association assoc = fkSide(model, rel);
             if (assoc != null && assoc.many().getId().equals(cls.getId())) {
                 result.add(assoc.one());
@@ -187,6 +264,20 @@ public class CodeGeneratorService {
     private List<ClassModel> oneToManyOf(ClassModel cls, DiagramModel model) {
         List<ClassModel> result = new ArrayList<>();
         for (RelationModel rel : model.getRelations()) {
+            if (rel.isManyToMany()) {
+                ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                if (inter != null) {
+                    if (from != null && (from.getId().equals(cls.getId()) || from.getName().equalsIgnoreCase(cls.getName()))) {
+                        if (!result.contains(inter)) result.add(inter);
+                    }
+                    if (to != null && (to.getId().equals(cls.getId()) || to.getName().equalsIgnoreCase(cls.getName()))) {
+                        if (!result.contains(inter)) result.add(inter);
+                    }
+                }
+                continue;
+            }
             Association assoc = fkSide(model, rel);
             if (assoc != null && assoc.one().getId().equals(cls.getId())) {
                 result.add(assoc.many());
@@ -216,9 +307,13 @@ public class CodeGeneratorService {
             sql.append(String.join(",\n", cols)).append("\n);\n\n");
         }
 
-        // Tablas intermedias para relaciones N:M (*..*)
+        // Tablas intermedias SQL puras para relaciones N:M (*..*) sin clase intermedia
         for (RelationModel rel : model.getRelations()) {
             if ("*..*".equals(rel.getMult()) || rel.getEffectiveIntermediateTable() != null) {
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                if (inter != null) {
+                    continue; // Ya generada como clase de entidad con id BIGSERIAL
+                }
                 ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
                 ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
                 if (from == null || to == null) continue;
@@ -246,8 +341,30 @@ public class CodeGeneratorService {
             }
         }
 
-        // Foreign keys para relaciones 1..* / composición / agregación / herencia
+        // Foreign keys para relaciones 1..* / composición / agregación / herencia / intermedia N:M
         for (RelationModel rel : model.getRelations()) {
+            if (rel.isManyToMany()) {
+                ClassModel inter = resolveIntermediateClass(model, rel);
+                ClassModel from = resolveEnd(model, rel.getFromId(), rel.getFromName());
+                ClassModel to = resolveEnd(model, rel.getToId(), rel.getToName());
+                if (inter != null && from != null && to != null) {
+                    String interTable = tableName(inter.getName());
+                    String fromTable = tableName(from.getName());
+                    String toTable = tableName(to.getName());
+
+                    sql.append("ALTER TABLE ").append(interTable)
+                            .append(" ADD CONSTRAINT fk_").append(interTable).append("_").append(fromTable)
+                            .append(" FOREIGN KEY (").append(fromTable).append("_id) REFERENCES ")
+                            .append(fromTable).append("(id) ON DELETE CASCADE;\n");
+
+                    sql.append("ALTER TABLE ").append(interTable)
+                            .append(" ADD CONSTRAINT fk_").append(interTable).append("_").append(toTable)
+                            .append(" FOREIGN KEY (").append(toTable).append("_id) REFERENCES ")
+                            .append(toTable).append("(id) ON DELETE CASCADE;\n");
+                }
+                continue;
+            }
+
             Association assoc = fkSide(model, rel);
             if (assoc == null) continue;
 
@@ -667,7 +784,11 @@ public class CodeGeneratorService {
     }
 
     private String toPascal(String raw) {
-        String[] parts = safeName(raw).split("[^A-Za-z0-9]+");
+        String safe = safeName(raw);
+        if (safe.startsWith("Detalle_")) {
+            return "Detalle_" + toPascal(safe.substring(8));
+        }
+        String[] parts = safe.split("[^A-Za-z0-9]+");
         StringBuilder out = new StringBuilder();
         for (String part : parts) {
             if (part.isBlank()) {
@@ -683,7 +804,10 @@ public class CodeGeneratorService {
 
     private String toCamel(String raw) {
         String pascal = toPascal(raw);
-        return Character.toLowerCase(pascal.charAt(0)) + pascal.substring(1);
+        if (pascal.startsWith("Detalle_")) {
+            return "detalle" + pascal.substring(8);
+        }
+        return Character.toLowerCase(pascal.charAt(0)) + (pascal.length() > 1 ? pascal.substring(1) : "");
     }
 
     private String toSnake(String name) {

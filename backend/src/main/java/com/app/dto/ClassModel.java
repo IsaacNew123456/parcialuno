@@ -18,6 +18,15 @@ public class ClassModel {
     private long version = 0L;
     private List<AttrModel> attrs = new ArrayList<>();
     private Boolean isPivotTable = false;
+    private Boolean isIntermediate = false;
     private List<String> primaryKeyColumns = new ArrayList<>();
     private List<String> methods = new ArrayList<>();
+
+    public boolean isIntermediate() {
+        return Boolean.TRUE.equals(isIntermediate);
+    }
+
+    public void setIntermediate(boolean intermediate) {
+        this.isIntermediate = intermediate;
+    }
 }
