@@ -1,0 +1,144 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CASE UML 2.5 — Modelado de clases</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true">CL</div>
+        <div>
+          <h1>CASE UML 2.5</h1>
+          <p>Diagrama de clases · generación Spring / PostgreSQL</p>
+        </div>
+      </div>
+
+      <div class="session" aria-live="polite">
+        <span class="session-dot" title="En línea"></span>
+        <div class="session-meta">
+          <strong>Sala colaborativa (simulado)</strong>
+          <span id="session-id">sess_7f3a · 3 en línea</span>
+        </div>
+        <div class="avatars" aria-label="Participantes">
+          <span class="avatar is-a" title="Ana Ruiz">AR</span>
+          <span class="avatar is-b" title="Luis Mora">LM</span>
+          <span class="avatar is-you" title="Tú">TÚ</span>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button type="button" class="icon-btn" id="btn-mic" aria-pressed="false" aria-label="Comandos por voz">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 3a3 3 0 0 0-3 3v6a3 3 0 0 0 6 0V6a3 3 0 0 0-3-3Z" />
+            <path d="M19 11a7 7 0 0 1-14 0" />
+            <path d="M12 18v3" />
+          </svg>
+        </button>
+        <button type="button" class="icon-btn" id="btn-help" aria-expanded="false" aria-controls="help-popover" aria-label="Ayuda rápida">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M9.5 9.5a2.5 2.5 0 1 1 3.4 2.3c-.7.3-1.4.9-1.4 1.7V14" />
+            <path d="M12 17h.01" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <aside class="sidebar" aria-label="Paleta de modelado">
+      <form class="panel" id="form-class" novalidate>
+        <h2>Clase</h2>
+        <div class="field">
+          <label for="class-name">Nombre</label>
+          <input id="class-name" name="className" autocomplete="off" required placeholder="Pedido" />
+        </div>
+        <div class="field">
+          <label for="class-attrs">Atributos (separados por coma)</label>
+          <textarea id="class-attrs" name="attrs" placeholder="id:Long, fecha:LocalDate, total:BigDecimal"></textarea>
+          <p class="hint">Opcional: nombre:Tipo. Sin tipo se usa String.</p>
+        </div>
+        <p class="form-error" id="class-error" role="alert"></p>
+        <button type="submit" class="btn btn-primary btn-block">Crear clase</button>
+      </form>
+
+      <form class="panel" id="form-rel" novalidate>
+        <h2>Relación</h2>
+        <div class="field">
+          <label for="rel-from">Origen</label>
+          <select id="rel-from" name="from" required>
+            <option value="">— seleccionar —</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rel-mult">Multiplicidad (UML 2.5)</label>
+          <select id="rel-mult" name="mult">
+            <option value="1..*">1..* (uno a muchos)</option>
+            <option value="*..1">*..1 (muchos a uno)</option>
+          </select>
+        </div>
+        <div class="field">
+          <label for="rel-to">Destino</label>
+          <select id="rel-to" name="to" required>
+            <option value="">— seleccionar —</option>
+          </select>
+        </div>
+        <p class="form-error" id="rel-error" role="alert"></p>
+        <button type="submit" class="btn btn-block">Crear asociación</button>
+      </form>
+
+      <div class="actions">
+        <button type="button" class="btn btn-primary btn-block" id="btn-generate">Generar código</button>
+        <button type="button" class="btn btn-block" id="btn-postman">Exportar Postman</button>
+        <button type="button" class="btn btn-block" id="btn-zip">📦 Descargar Proyecto Backend (.ZIP)</button>
+      </div>
+    </aside>
+
+    <main class="canvas-wrap" id="canvas" aria-label="Lienzo del diagrama de clases">
+      <p class="canvas-empty" id="canvas-empty">
+        Crea una clase en el panel izquierdo. Arrastra los nodos para acomodar el diagrama.
+      </p>
+      <svg id="connectors" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"></svg>
+    </main>
+  </div>
+
+  <div class="help-popover" id="help-popover" hidden role="dialog" aria-labelledby="help-title">
+    <h2 id="help-title">Ayuda rápida</h2>
+    <ul>
+      <li>Las clases se dibujan como cajas UML (estereotipo «entity»).</li>
+      <li>Asociaciones: <strong>1..*</strong> (origen uno, destino muchos) o <strong>*..1</strong>.</li>
+      <li>Arrastra el encabezado de la clase. Las líneas SVG se recalculan.</li>
+      <li>Voz (Chrome/Edge): «crear clase Cliente», «relacionar Pedido con Cliente».</li>
+      <li>Atajos: <kbd>Esc</kbd> cierra el modal; <kbd>?</kbd> abre esta ayuda.</li>
+    </ul>
+  </div>
+
+  <div class="modal-backdrop" id="code-modal" hidden>
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+      <div class="modal-head">
+        <h2 id="modal-title">Artefactos generados</h2>
+        <button type="button" class="btn btn-ghost" id="btn-close-modal">Cerrar</button>
+      </div>
+      <div class="tabs" role="tablist" aria-label="Tipo de código">
+        <button type="button" class="tab" role="tab" id="tab-ddl" aria-selected="true" aria-controls="pane-ddl" data-pane="ddl">PostgreSQL DDL</button>
+        <button type="button" class="tab" role="tab" id="tab-entity" aria-selected="false" aria-controls="pane-entity" data-pane="entity">Entity JPA</button>
+        <button type="button" class="tab" role="tab" id="tab-repo" aria-selected="false" aria-controls="pane-repo" data-pane="repo">Repository</button>
+        <button type="button" class="tab" role="tab" id="tab-svc" aria-selected="false" aria-controls="pane-svc" data-pane="svc">Service</button>
+        <button type="button" class="tab" role="tab" id="tab-ctrl" aria-selected="false" aria-controls="pane-ctrl" data-pane="ctrl">Controller</button>
+      </div>
+      <pre class="code-pane" id="pane-ddl" role="tabpanel" aria-labelledby="tab-ddl"></pre>
+      <pre class="code-pane" id="pane-entity" role="tabpanel" aria-labelledby="tab-entity" hidden></pre>
+      <pre class="code-pane" id="pane-repo" role="tabpanel" aria-labelledby="tab-repo" hidden></pre>
+      <pre class="code-pane" id="pane-svc" role="tabpanel" aria-labelledby="tab-svc" hidden></pre>
+      <pre class="code-pane" id="pane-ctrl" role="tabpanel" aria-labelledby="tab-ctrl" hidden></pre>
+    </div>
+  </div>
+
+  <div class="toast" id="toast" hidden role="status"></div>
+
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+  <script src="app.js" defer></script>
+</body>
+</html>
