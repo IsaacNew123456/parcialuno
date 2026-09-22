@@ -28,10 +28,10 @@ function getBrokerUrl() {
   }
   const isSecure = typeof window !== 'undefined' && window.location.protocol === 'https:';
   const wsProto = isSecure ? 'wss:' : 'ws:';
-  // En desarrollo con Vite en :5173, el backend de Spring Boot corre en localhost:8080
+  // En desarrollo con Vite en :5173, el backend de Spring Boot corre en 3.14.3.4:8080
   const host = (typeof window !== 'undefined' && window.location.port === '5173')
-    ? 'localhost:8080'
-    : (typeof window !== 'undefined' ? window.location.host : 'localhost:8080');
+    ? '3.14.3.4:8080'
+    : (typeof window !== 'undefined' ? window.location.host : '3.14.3.4:8080');
 
   return `${wsProto}//${host}/ws-diagram/websocket`;
 }

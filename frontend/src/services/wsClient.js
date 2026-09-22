@@ -33,7 +33,7 @@ class WebSocketClient {
       return import.meta.env.VITE_WS_URL;
     }
     const isLocal5173 = typeof window !== 'undefined' && window.location.port === '5173';
-    const host = isLocal5173 ? 'localhost:8080' : (typeof window !== 'undefined' ? window.location.host : 'localhost:8080');
+    const host = isLocal5173 ? '3.14.3.4:8080' : (typeof window !== 'undefined' ? window.location.host : '3.14.3.4:8080');
     const protocol = typeof window !== 'undefined' && window.location.protocol === 'https:' ? 'https:' : 'http:';
     return `${protocol}//${host}/ws`;
   }

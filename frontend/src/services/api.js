@@ -1,7 +1,7 @@
 import axios from 'axios';
 
 /**
- * Cliente Axios configurado con baseURL apuntando a /api (proxy en vite.config.js -> localhost:8080).
+ * Cliente Axios configurado con baseURL apuntando a /api (proxy en vite.config.js -> http://3.14.3.4:8080).
  */
 const apiClient = axios.create({
   baseURL: import.meta.env.VITE_API_BASE_URL || '/api',
